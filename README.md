@@ -49,4 +49,9 @@ The app should be installed to each target channel, and the channel manager can 
 - `/activate-standup`
 - `/reset-standup`
 
+Bot admins (the Slack user IDs in `ADMIN_USER_IDS` in `app.py`) can also run, from any channel:
+
+- `/standup-channels` – list every channel the bot is in.
+- `/stop-all-standups` – stop standups in every channel. Each channel's manager can turn them back on with `/activate-standup`.
+
 This keeps the bot dormant until explicitly enabled for a channel. The reset command clears the bot’s in-memory state for debugging and is protected by the `RESET_KEY` value in `.env`.

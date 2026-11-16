@@ -188,7 +188,7 @@ def fetch_ping_group_options(client, query: str | None = None) -> list[dict[str,
     return options[:100]
 
 
-def reset_channel_state(channel_id: str) -> ChannelState:
+def reset_channel_state(channel_id: str, save: bool = True) -> ChannelState:
     state = get_channel_state(channel_id)
     state.active = False
     state.timezone = "UTC"
@@ -203,7 +203,8 @@ def reset_channel_state(channel_id: str) -> ChannelState:
     state.last_thread_ts = None
     state.last_thread_users = []
     clear_standup_timer(channel_id)
-    save_state()
+    if save:
+        save_state()
     return state
 
 
@@ -569,7 +570,15 @@ def reset_command(ack, body, respond):
     respond(text="Standup bot reset for this channel. State has been cleared for debugging.", response_type="ephemeral")
 
 
-LIST_CHANNELS_USER_ID = "U07NXNK171N"
+# Slack user IDs allowed to run the bot-wide admin commands
+# (/standup-channels, /stop-all-standups). Add more IDs here as needed.
+ADMIN_USER_IDS: frozenset[str] = frozenset({
+    "U07NXNK171N",
+})
+
+
+def is_admin(user_id: str) -> bool:
+    return user_id in ADMIN_USER_IDS
 
 
 def fetch_bot_channels(client) -> list[dict]:
@@ -591,7 +600,7 @@ def fetch_bot_channels(client) -> list[dict]:
 def list_channels_command(ack, body, respond):
     ack()
 
-    if body["user_id"] != LIST_CHANNELS_USER_ID:
+    if not is_admin(body["user_id"]):
         respond(text="You are not allowed to run this command.", response_type="ephemeral")
         return
 
@@ -609,6 +618,32 @@ def list_channels_command(ack, body, respond):
 
     lines = [f"`{channel['id']}` #{channel.get('name', '')}" for channel in bot_channels]
     respond(text=f"The bot is in {len(lines)} channel(s):\n" + "\n".join(lines), response_type="ephemeral")
+
+
+@app.command("/stop-all-standups")
+def stop_all_standups_command(ack, body, respond):
+    ack()
+
+    if not is_admin(body["user_id"]):
+        respond(text="You are not allowed to run this command.", response_type="ephemeral")
+        return
+
+    # Hold the post lock so a standup that is due right now can't be sent
+    # half-way through the shutdown.
+    with _post_lock:
+        stopped = [channel_id for channel_id, state in list(channels.items()) if state.active]
+        for channel_id in stopped:
+            reset_channel_state(channel_id, save=False)
+        save_state()
+
+    logger.warning("Admin %s stopped standups in %d channel(s)", body["user_id"], len(stopped))
+    if not stopped:
+        respond(text="No channels had standups running.", response_type="ephemeral")
+        return
+    respond(
+        text=f"Stopped standups in {len(stopped)} channel(s). Channel managers can turn them back on with `/activate-standup`.",
+        response_type="ephemeral",
+    )
 
 
 @app.event("message")

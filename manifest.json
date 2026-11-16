@@ -24,6 +24,11 @@
                 "command": "/standup-channels",
                 "description": "List the IDs of every channel the standup bot is in.",
                 "should_escape": false
+            },
+            {
+                "command": "/stop-all-standups",
+                "description": "Admin only: stop standups in every channel.",
+                "should_escape": false
             }
         ]
     },
