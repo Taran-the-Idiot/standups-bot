@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
 import ssl as ssl_lib
@@ -18,6 +17,8 @@ from slack_bolt.adapter.socket_mode.websocket_client import SocketModeHandler
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
+import state_store
+
 from standup_logic import (
     DEFAULT_REMINDER_INTERVAL_HOURS,
     DEFAULT_STANDUP_FREQUENCY,
@@ -25,7 +26,6 @@ from standup_logic import (
     build_reminder_text,
     compute_missing_users,
     describe_reminder_interval,
-    deserialize_channels,
     get_default_reminder_interval_option,
     get_default_standup_frequency_option,
     get_reminder_interval_options,
@@ -40,7 +40,6 @@ from standup_logic import (
     normalize_standup_frequency,
     normalize_timezone_value,
     reminder_cutoff,
-    serialize_channels,
     standup_frequency_label,
 )
 
@@ -77,34 +76,25 @@ PERMANENT_CHANNEL_ERRORS = {"channel_not_found", "not_in_channel", "is_archived"
 # Bot state (which channels are active, their timezone/ping group, and the
 # next scheduled times) lives only in the `channels` dict above, so without
 # persistence a process restart would silently deactivate every channel.
-# Persist it to a small JSON file and reload it on startup.
-STATE_FILE = Path(os.environ.get("STANDUP_STATE_FILE", "standup_state.json"))
-_state_file_lock = threading.Lock()
+# Persist it to Supabase (see state_store.py) and reload it on startup.
+_state_save_lock = threading.Lock()
+# Only used to stop two copies of the bot running on the same machine.
+INSTANCE_LOCK_FILE = Path(os.environ.get("STANDUP_LOCK_FILE", "standup_bot.lock"))
 
 
 def save_state() -> None:
-    with _state_file_lock:
+    with _state_save_lock:
         try:
-            data = serialize_channels(channels)
-            tmp_path = STATE_FILE.with_suffix(STATE_FILE.suffix + ".tmp")
-            tmp_path.write_text(json.dumps(data, indent=2))
-            tmp_path.replace(STATE_FILE)
-        except OSError:
-            logger.exception("Failed to save standup state to %s", STATE_FILE)
+            state_store.save_channels(channels)
+        except Exception:
+            logger.exception("Failed to save standup state to Supabase")
 
 
 def load_state() -> None:
-    if not STATE_FILE.exists():
-        return
-
-    try:
-        raw = json.loads(STATE_FILE.read_text())
-    except (OSError, json.JSONDecodeError):
-        logger.exception("Failed to read standup state from %s; starting with no state", STATE_FILE)
-        return
-
-    channels.update(deserialize_channels(raw))
-    logger.info("Loaded standup state for %d channel(s) from %s", len(channels), STATE_FILE)
+    # Fail loudly here: starting with empty state would silently deactivate
+    # every channel, which is worse than not starting.
+    channels.update(state_store.load_channels())
+    logger.info("Loaded standup state for %d channel(s) from Supabase", len(channels))
 
 
 def restore_standup_timers() -> None:
@@ -656,7 +646,7 @@ if __name__ == "__main__":
     # Two copies of the bot each post their own standup thread and then nag
     # everyone in "their" thread, even people who replied in the other one.
     # Refuse to start a second copy on the same machine.
-    lock_file = open(STATE_FILE.with_suffix(STATE_FILE.suffix + ".lock"), "w")
+    lock_file = open(INSTANCE_LOCK_FILE, "w")
     try:
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:

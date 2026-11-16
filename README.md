@@ -10,7 +10,7 @@ A Slack bot that helps teams run daily standups.
 - Standups can go out every day (default, recommended), every other day, or once a week, always at 08:00 in the channel timezone.
 - It then sends reminder pings in the thread to anyone in the selected ping group who has not replied yet. The interval is configurable from 1 to 12 hours; two hours is the default and what we recommend.
 - Reminders stop once everyone has replied, when the next standup replaces the thread, or at 22:00 (channel timezone) on the day of the standup - whichever comes first.
-- Channels configured before these settings existed keep working: any setting missing from `standup_state.json` falls back to its default.
+- Channels configured before these settings existed keep working: any setting missing from the stored channel state falls back to its default.
 
 ## Local setup
 
@@ -21,7 +21,8 @@ A Slack bot that helps teams run daily standups.
    - `python -m pip install -r requirements.txt`
 3. Copy the environment example:
    - `cp .env.example .env`
-4. Fill in your Slack credentials and a debug reset key.
+4. Fill in your Slack credentials, a debug reset key, and your Supabase project URL and service role key (Supabase dashboard → Project Settings → API).
+   - Create the state table once by running `supabase_schema.sql` in the Supabase SQL editor.
 5. Start the app (must be the venv's Python, or you get `ModuleNotFoundError`):
    - `python app.py`  (or `.venv/bin/python app.py` without activating)
 6. Run tests:
